@@ -320,6 +320,88 @@
     background: rgba(255,255,255,0.18); padding:3px 10px; border-radius:999px;
     cursor:pointer;
   }
+
+  /* Splash / opening screen */
+  .splash{
+    position: fixed; inset:0; z-index:100;
+    background:
+      linear-gradient(165deg, var(--harbour) 0%, var(--jacaranda-deep) 55%, var(--jacaranda) 100%);
+    display:flex; align-items:center; justify-content:center;
+    padding: env(safe-area-inset-top) 24px env(safe-area-inset-bottom);
+    transition: opacity .45s ease, transform .45s ease;
+  }
+  .splash.hide{
+    opacity:0; transform: scale(1.03); pointer-events:none;
+  }
+  .splash-inner{
+    text-align:center; color:#fff; max-width:340px; width:100%;
+  }
+  .splash-emoji{
+    font-size:52px; margin-bottom:6px;
+    animation: splash-float 2.6s ease-in-out infinite;
+  }
+  @keyframes splash-float{
+    0%,100%{ transform: translateY(0); }
+    50%{ transform: translateY(-8px); }
+  }
+  .splash-title{
+    font-family:'Pretendard', sans-serif; font-weight:800; font-size:32px; margin:0;
+    letter-spacing:0.02em;
+  }
+  .splash-sub{
+    font-size:13.5px; color: rgba(255,255,255,0.85); margin:8px 0 30px; line-height:1.5;
+  }
+  .splash-sync-btn{
+    width:100%; padding:16px 18px; border-radius:999px; border:none;
+    background:#fff; color: var(--jacaranda-deep);
+    font-family:'Pretendard', sans-serif; font-weight:800; font-size:16px;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    cursor:pointer; box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+  }
+  .splash-sync-btn:active{ transform: scale(0.97); }
+  .splash-sync-btn.syncing{ opacity:0.75; pointer-events:none; }
+  .splash-sync-btn .spin{
+    display:inline-block; width:16px; height:16px;
+    border:2.5px solid rgba(122,107,176,0.25); border-top-color: var(--jacaranda-deep);
+    border-radius:50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin{ to{ transform: rotate(360deg); } }
+  .splash-status{
+    font-size:12.5px; color: rgba(255,255,255,0.8); margin-top:14px; min-height:16px;
+  }
+  .splash-skip{
+    background:none; border:none; color: rgba(255,255,255,0.7);
+    font-size:12.5px; font-weight:600; margin-top:22px; cursor:pointer;
+    text-decoration: underline; text-underline-offset:3px;
+  }
+
+  /* Manual refresh button (in-app) */
+  .refresh-row{
+    display:flex; justify-content:flex-end; padding: 0 20px 4px;
+  }
+  .refresh-btn{
+    display:flex; align-items:center; gap:5px;
+    background:#fff; border:1px solid var(--line); color: var(--ink-soft);
+    font-family:'Pretendard', sans-serif; font-weight:600; font-size:11.5px;
+    padding:6px 11px; border-radius:999px; cursor:pointer;
+  }
+  .refresh-btn:active{ background: var(--paper); }
+  .refresh-btn .ic{ display:inline-block; transition: transform .5s ease; }
+  .refresh-btn.spinning .ic{ animation: spin 0.7s linear infinite; }
+
+  /* Toast */
+  .toast{
+    position: fixed; left:50%; bottom: calc(96px + env(safe-area-inset-bottom));
+    transform: translateX(-50%) translateY(12px);
+    background: rgba(35,37,38,0.92); color:#fff;
+    font-size:13px; font-weight:600; padding:10px 18px; border-radius:999px;
+    z-index: 90; opacity:0; pointer-events:none;
+    transition: opacity .25s ease, transform .25s ease;
+    white-space:nowrap;
+  }
+  .toast.show{
+    opacity:1; transform: translateX(-50%) translateY(0);
+  }
 </style>
 </head>
 <body>
@@ -327,6 +409,20 @@
   <span>📲 홈 화면에 추가하면 앱처럼 사용할 수 있습니다.</span>
   <button id="installBannerClose" aria-label="닫기">✕</button>
 </div>
+
+<div class="splash" id="splash">
+  <div class="splash-inner">
+    <div class="splash-emoji">🌸🧠</div>
+    <h1 class="splash-title">SYDNEY</h1>
+    <p class="splash-sub">시작하기 전에, 친구들이 추가한<br>최신 일정을 한번 받아올까요?</p>
+    <button class="splash-sync-btn" id="splashSyncBtn">🧠 친구들과 뉴런 공유</button>
+    <p class="splash-status" id="splashStatus">눌러서 최신 일정 받아오기</p>
+    <button class="splash-skip" id="splashSkipBtn">그냥 들어갈게요 →</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
 <div class="app" id="app">
   <div class="hero">
     <div class="hero-top">
@@ -339,6 +435,9 @@
     </div>
   </div>
 
+  <div class="refresh-row">
+    <button class="refresh-btn" id="refreshBtn"><span class="ic">🔄</span> 새로고침</button>
+  </div>
   <div class="day-tabs" id="dayTabs"></div>
   <div class="share-row">
     <button id="exportBtn" class="share-btn">📤 친구에게 공유 (내보내기)</button>
@@ -492,6 +591,29 @@ function updateSyncBadge(){
   const el = document.getElementById('syncBadge');
   if(!el) return;
   el.textContent = fbRef ? '· 🟢 실시간 공유중' : '· 📱 이 기기에만 저장됨';
+}
+
+/* 수동 동기화: 리스너의 다음 업데이트를 기다리지 않고 지금 바로 서버에서 최신 데이터를 받아옵니다. */
+async function forceSync(){
+  if(!fbRef) return { ok:true, remote:false };
+  try{
+    const snap = await fbRef.once('value');
+    applyIncomingData(snap.val(), false);
+    return { ok:true, remote:true };
+  }catch(e){
+    console.warn('동기화 실패', e);
+    return { ok:false, remote:true };
+  }
+}
+
+let toastTimer = null;
+function showToast(msg, duration){
+  const el = document.getElementById('toast');
+  if(!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), duration || 1800);
 }
 
 async function loadData(){
@@ -918,6 +1040,55 @@ if('serviceWorker' in navigator){
       console.warn('Service worker registration failed:', err);
     });
   });
+}
+
+/* 오프닝 화면: 친구들과 뉴런 공유 버튼 */
+const splash = document.getElementById('splash');
+const splashSyncBtn = document.getElementById('splashSyncBtn');
+const splashStatus = document.getElementById('splashStatus');
+const splashSkipBtn = document.getElementById('splashSkipBtn');
+
+function hideSplash(){
+  if(!splash) return;
+  splash.classList.add('hide');
+  setTimeout(() => { splash.style.display = 'none'; }, 480);
+}
+
+if(splashSyncBtn){
+  splashSyncBtn.onclick = async () => {
+    splashSyncBtn.classList.add('syncing');
+    splashSyncBtn.innerHTML = '<span class="spin"></span> 뉴런 전송 중...';
+    splashStatus.textContent = fbRef ? '친구들 기기와 연결하는 중…' : '';
+    const result = await forceSync();
+    splashSyncBtn.classList.remove('syncing');
+    if(!fbRef){
+      splashSyncBtn.innerHTML = '📱 이 기기 전용 모드';
+      splashStatus.textContent = '실시간 공유가 아직 설정되어 있지 않아요';
+    }else if(result.ok){
+      splashSyncBtn.innerHTML = '✅ 뉴런 공유 완료!';
+      splashStatus.textContent = '최신 일정을 받아왔어요';
+    }else{
+      splashSyncBtn.innerHTML = '⚠️ 연결 실패';
+      splashStatus.textContent = '네트워크를 확인하고 다시 시도해주세요';
+    }
+    setTimeout(hideSplash, 650);
+  };
+}
+if(splashSkipBtn){
+  splashSkipBtn.onclick = hideSplash;
+}
+
+/* 일정 화면 안에서 바로 누르는 새로고침 버튼 */
+const refreshBtn = document.getElementById('refreshBtn');
+if(refreshBtn){
+  refreshBtn.onclick = async () => {
+    refreshBtn.classList.add('spinning');
+    const result = await forceSync();
+    refreshBtn.classList.remove('spinning');
+    if(!fbRef) showToast('📱 이 기기에만 저장되는 모드예요');
+    else if(result.ok) showToast('🌸 최신 일정으로 동기화했어요');
+    else showToast('⚠️ 동기화 실패, 다시 시도해주세요');
+  };
 }
 
 loadData();
