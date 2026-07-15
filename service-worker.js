@@ -1,6 +1,6 @@
 // Sydney 여행 일정 - Service Worker
 // 캐시 버전을 올리면 사용자에게 업데이트가 배포됩니다. (README 참고)
-const CACHE_VERSION = 'sydney-trip-v5';
+const CACHE_VERSION = 'sydney-trip-v6';
 const CORE_CACHE = `${CACHE_VERSION}-core`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
