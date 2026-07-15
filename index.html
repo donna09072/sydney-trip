@@ -1059,11 +1059,27 @@ function initInstallBanner(){
 }
 initInstallBanner();
 
-/* Service worker 등록 (오프라인 지원) */
+/* Service worker 등록 (오프라인 지원) + 업데이트 자동 반영 */
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('service-worker.js').catch((err) => {
+    navigator.serviceWorker.register('service-worker.js').then((reg) => {
+      // 등록 직후 새 버전이 있는지 바로 한번 확인
+      reg.update();
+      // 앱을 다시 열거나 백그라운드에서 돌아올 때마다 업데이트 확인
+      document.addEventListener('visibilitychange', () => {
+        if(document.visibilityState === 'visible') reg.update();
+      });
+    }).catch((err) => {
       console.warn('Service worker registration failed:', err);
+    });
+
+    // 새 서비스워커가 활성화되면(컨트롤러 교체) 화면을 한 번 새로고침해서
+    // 예전 JS가 아니라 최신 버전이 바로 반영되도록 합니다.
+    let swRefreshed = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if(swRefreshed) return;
+      swRefreshed = true;
+      window.location.reload();
     });
   });
 }
