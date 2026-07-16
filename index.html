@@ -274,6 +274,8 @@
     font-family:'Pretendard', sans-serif; font-weight:700; font-size:19px; margin: 0 0 14px;
   }
   .field{ margin-bottom:14px; }
+  .field-row{ display:flex; gap:10px; }
+  .field-row .field{ flex:1; min-width:0; }
   .field label{
     font-size:12px; font-weight:600; color: var(--ink-soft); display:block; margin-bottom:6px;
   }
@@ -410,10 +412,21 @@
   }
   .expense-budget-fill.over{ background: var(--coral); }
   .expense-budget-text{ font-size:11.5px; margin-top:7px; opacity:.92; }
+  .expense-total-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .currency-toggle{
+    display:flex; background: rgba(255,255,255,0.16); border-radius:999px; padding:2px;
+  }
+  .currency-toggle button{
+    border:none; background:none; color: rgba(255,255,255,0.8);
+    font-size:11px; font-weight:700; padding:5px 10px; border-radius:999px; cursor:pointer;
+  }
+  .currency-toggle button.active{ background:#fff; color: var(--jacaranda-deep); }
+  .expense-total-links{ display:flex; gap:16px; margin-top:8px; }
   .expense-budget-link{
     background:none; border:none; color:#fff; text-decoration:underline;
-    text-underline-offset:2px; font-size:11px; cursor:pointer; padding:0; opacity:.85; margin-top:8px;
+    text-underline-offset:2px; font-size:11px; cursor:pointer; padding:0; opacity:.85; margin-top:0;
   }
+  .e-amount-sub{ font-size:10.5px; color: var(--ink-soft); margin-top:1px; }
   .expense-list{ display:flex; flex-direction:column; gap:10px; margin-bottom:16px; }
   .expense-item{
     background:#fff; border:1px solid var(--line); border-radius:14px;
@@ -546,14 +559,23 @@
   <div class="sheet">
     <h3>💰 가계부</h3>
     <div class="expense-total">
-      <div class="label">공금 총 지출</div>
+      <div class="expense-total-head">
+        <div class="label">공금 총 지출</div>
+        <div class="currency-toggle" id="currencyToggle">
+          <button data-cur="KRW" id="curBtnKRW">₩ 원화</button>
+          <button data-cur="AUD" id="curBtnAUD">$ AUD</button>
+        </div>
+      </div>
       <div class="amount" id="expenseTotalAmount">0</div>
       <div class="count" id="expenseTotalCount">아직 기록된 지출이 없어요</div>
       <div class="expense-budget-wrap" id="expenseBudgetWrap" style="display:none;">
         <div class="expense-budget-track"><div class="expense-budget-fill" id="expenseBudgetFill"></div></div>
         <div class="expense-budget-text" id="expenseBudgetText"></div>
       </div>
-      <button class="expense-budget-link" id="expenseBudgetBtn">예산 설정하기</button>
+      <div class="expense-total-links">
+        <button class="expense-budget-link" id="expenseBudgetBtn">예산 설정하기</button>
+        <button class="expense-budget-link" id="exchangeRateBtn">환율 설정</button>
+      </div>
     </div>
     <div class="expense-list" id="expenseList"></div>
     <button class="expense-add-btn" id="expenseAddBtn">+ 지출 추가</button>
@@ -567,8 +589,22 @@
   <div class="sheet">
     <h3 id="expenseFormTitle">지출 추가</h3>
     <div class="field">
+      <label>통화</label>
+      <div class="cat-row" id="expCurrencyRow"></div>
+    </div>
+    <div class="field">
       <label>금액</label>
       <input type="number" id="expAmount" placeholder="예: 45000" inputmode="decimal">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>날짜</label>
+        <input type="date" id="expDate">
+      </div>
+      <div class="field">
+        <label>시간</label>
+        <input type="time" id="expTime">
+      </div>
     </div>
     <div class="field">
       <label>내용</label>
@@ -649,6 +685,9 @@ const defaultData = {
   tripStart: '',
   expenses: [],
   budget: 0,
+  budgetCurrency: 'KRW',
+  exchangeRate: 0,
+  displayCurrency: 'KRW',
   heroPhoto: '',
   days: [
     { id:'d1', label:'1일차', date:'', items:[
@@ -698,8 +737,16 @@ function normalizeData(d){
     if(!Array.isArray(day.items)) day.items = [];
   });
   if(!Array.isArray(d.expenses)) d.expenses = [];
+  d.expenses.forEach(exp => {
+    if(exp.currency !== 'AUD' && exp.currency !== 'KRW') exp.currency = 'KRW';
+    if(typeof exp.date !== 'string') exp.date = '';
+    if(typeof exp.time !== 'string') exp.time = '';
+  });
   if(typeof d.tripStart !== 'string') d.tripStart = '';
   if(typeof d.budget !== 'number') d.budget = 0;
+  if(d.budgetCurrency !== 'AUD' && d.budgetCurrency !== 'KRW') d.budgetCurrency = 'KRW';
+  if(typeof d.exchangeRate !== 'number') d.exchangeRate = 0;
+  if(d.displayCurrency !== 'AUD' && d.displayCurrency !== 'KRW') d.displayCurrency = 'KRW';
   if(typeof d.heroPhoto !== 'string') d.heroPhoto = '';
   // 예전 버전에서는 여행 시작일을 이 기기의 localStorage에만 저장했습니다.
   // 아직 공용 데이터에 시작일이 없고, 이 기기에 예전 값이 남아있다면 한 번만 옮겨줍니다.
@@ -1126,34 +1173,81 @@ const expenseBtn = document.getElementById('expenseBtn');
 const expenseCloseBtn = document.getElementById('expenseCloseBtn');
 const expenseFormOverlay = document.getElementById('expenseFormOverlay');
 let selectedExpCat = 'food';
+let selectedExpCurrency = 'KRW';
 let editingExpenseId = null;
+
+const CURRENCIES = {
+  KRW: { label: '₩ 원화', symbol: '₩' },
+  AUD: { label: '$ AUD', symbol: '$' }
+};
 
 function fmtAmount(n){
   return Number(n || 0).toLocaleString('ko-KR');
 }
 
+function fmtCurrency(amount, currency){
+  if(currency === 'AUD'){
+    return '$' + Number(amount || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  return '₩' + fmtAmount(Math.round(amount || 0));
+}
+
+/* 환율은 "1 AUD = 몇 원"으로 저장합니다. 환율이 설정되어 있어야
+   서로 다른 통화로 기록된 지출들을 하나의 총액으로 합칠 수 있어요. */
+function convertCurrency(amount, from, to){
+  if(from === to) return amount;
+  const rate = data.exchangeRate || 0;
+  if(!rate) return null;
+  if(from === 'AUD' && to === 'KRW') return amount * rate;
+  if(from === 'KRW' && to === 'AUD') return amount / rate;
+  return amount;
+}
+
 function renderExpenses(){
-  const total = (data.expenses || []).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-  document.getElementById('expenseTotalAmount').textContent = fmtAmount(total);
-  document.getElementById('expenseTotalCount').textContent =
-    (data.expenses && data.expenses.length) ? `총 ${data.expenses.length}건 기록됨` : '아직 기록된 지출이 없어요';
+  const display = data.displayCurrency || 'KRW';
+  document.getElementById('curBtnKRW').classList.toggle('active', display === 'KRW');
+  document.getElementById('curBtnAUD').classList.toggle('active', display === 'AUD');
+
+  const expenses = data.expenses || [];
+  let total = 0;
+  let hasUnconverted = false;
+  expenses.forEach(e => {
+    const converted = convertCurrency(Number(e.amount) || 0, e.currency || 'KRW', display);
+    if(converted === null){ hasUnconverted = true; }
+    else{ total += converted; }
+  });
+
+  document.getElementById('expenseTotalAmount').textContent = fmtCurrency(total, display);
+  if(!expenses.length){
+    document.getElementById('expenseTotalCount').textContent = '아직 기록된 지출이 없어요';
+  }else if(hasUnconverted){
+    document.getElementById('expenseTotalCount').textContent =
+      `총 ${expenses.length}건 · ⚠️ 환율 미설정으로 일부 통화는 합계에서 빠졌어요`;
+  }else{
+    document.getElementById('expenseTotalCount').textContent = `총 ${expenses.length}건 기록됨`;
+  }
 
   const budget = data.budget || 0;
   const budgetWrap = document.getElementById('expenseBudgetWrap');
   const budgetBtn = document.getElementById('expenseBudgetBtn');
   if(budget > 0){
-    budgetWrap.style.display = 'block';
-    budgetBtn.textContent = '예산 변경';
-    const pct = Math.min(100, Math.round((total / budget) * 100));
-    const fill = document.getElementById('expenseBudgetFill');
-    fill.style.width = pct + '%';
-    fill.classList.toggle('over', total > budget);
-    const text = document.getElementById('expenseBudgetText');
-    if(total > budget){
-      text.textContent = `예산 ${fmtAmount(budget)} 중 ${fmtAmount(total)} 사용 · 예산 초과 +${fmtAmount(total - budget)}`;
+    const budgetInDisplay = convertCurrency(budget, data.budgetCurrency || 'KRW', display);
+    if(budgetInDisplay === null){
+      budgetWrap.style.display = 'none';
     }else{
-      text.textContent = `예산 ${fmtAmount(budget)} 중 ${fmtAmount(total)} 사용 (${pct}%)`;
+      budgetWrap.style.display = 'block';
+      const pct = Math.min(100, Math.round((total / budgetInDisplay) * 100));
+      const fill = document.getElementById('expenseBudgetFill');
+      fill.style.width = pct + '%';
+      fill.classList.toggle('over', total > budgetInDisplay);
+      const text = document.getElementById('expenseBudgetText');
+      if(total > budgetInDisplay){
+        text.textContent = `예산 ${fmtCurrency(budgetInDisplay, display)} 중 ${fmtCurrency(total, display)} 사용 · 예산 초과 +${fmtCurrency(total - budgetInDisplay, display)}`;
+      }else{
+        text.textContent = `예산 ${fmtCurrency(budgetInDisplay, display)} 중 ${fmtCurrency(total, display)} 사용 (${pct}%)`;
+      }
     }
+    budgetBtn.textContent = '예산 변경';
   }else{
     budgetWrap.style.display = 'none';
     budgetBtn.textContent = '예산 설정하기';
@@ -1161,21 +1255,30 @@ function renderExpenses(){
   budgetBtn.onclick = setBudget;
 
   const list = document.getElementById('expenseList');
-  const items = [...(data.expenses || [])].sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+  const items = [...expenses].sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
   if(!items.length){
     list.innerHTML = `<div class="expense-empty"><div class="big">🧾</div><p>아직 지출 내역이 없어요.<br>아래 버튼으로 첫 지출을 기록해보세요.</p></div>`;
     return;
   }
   list.innerHTML = items.map(e => {
     const cat = CATS[e.category] || CATS.etc;
+    const cur = e.currency || 'KRW';
+    const converted = cur !== display ? convertCurrency(Number(e.amount) || 0, cur, display) : null;
+    const whenParts = [];
+    if(e.date) whenParts.push(e.date.slice(5).replace('-', '/'));
+    if(e.time) whenParts.push(e.time);
+    const when = whenParts.join(' ');
     return `
       <div class="expense-item" data-id="${e.id}">
         <div class="e-cat" style="background:${cat.color}">${cat.label[0]}</div>
         <div class="e-info">
           <div class="e-memo">${escapeHtml(e.memo || cat.label)}</div>
-          <div class="e-meta">${cat.label}${e.payer ? ' · ' + escapeHtml(e.payer) + ' 결제' : ''}</div>
+          <div class="e-meta">${[when, cat.label, e.payer ? escapeHtml(e.payer) + ' 결제' : ''].filter(Boolean).join(' · ')}</div>
         </div>
-        <div class="e-amount">${fmtAmount(e.amount)}</div>
+        <div>
+          <div class="e-amount">${fmtCurrency(e.amount, cur)}</div>
+          ${converted !== null ? `<div class="e-amount-sub">≈ ${fmtCurrency(converted, display)}</div>` : ''}
+        </div>
       </div>
     `;
   }).join('');
@@ -1184,9 +1287,34 @@ function renderExpenses(){
   });
 }
 
+function setDisplayCurrency(cur){
+  data.displayCurrency = cur;
+  saveData();
+  renderExpenses();
+}
+
+function setExchangeRate(){
+  const current = data.exchangeRate ? String(data.exchangeRate) : '';
+  const input = prompt('1 AUD는 몇 원인가요? (예: 900)', current);
+  if(input === null) return;
+  const trimmed = input.trim().replace(/,/g, '');
+  if(trimmed === ''){
+    data.exchangeRate = 0;
+    saveData();
+    renderExpenses();
+    return;
+  }
+  const num = Number(trimmed);
+  if(isNaN(num) || num <= 0){ alert('숫자로 입력해주세요'); return; }
+  data.exchangeRate = num;
+  saveData();
+  renderExpenses();
+}
+
 function setBudget(){
   const current = data.budget ? String(data.budget) : '';
-  const input = prompt('여행 예산을 입력해주세요 (숫자만, 예: 800000)', current);
+  const curLabel = CURRENCIES[data.displayCurrency || 'KRW'].label;
+  const input = prompt(`여행 예산을 입력해주세요 (${curLabel} 기준, 숫자만, 예: 800000)`, current);
   if(input === null) return;
   const trimmed = input.trim().replace(/,/g, '');
   if(trimmed === ''){
@@ -1198,6 +1326,7 @@ function setBudget(){
   const num = Number(trimmed);
   if(isNaN(num) || num < 0){ alert('숫자로 입력해주세요'); return; }
   data.budget = num;
+  data.budgetCurrency = data.displayCurrency || 'KRW';
   saveData();
   renderExpenses();
 }
@@ -1212,6 +1341,25 @@ function buildExpCatRow(){
   });
 }
 
+function buildExpCurrencyRow(){
+  const row = document.getElementById('expCurrencyRow');
+  row.innerHTML = Object.entries(CURRENCIES).map(([k,v]) =>
+    `<div class="cat-chip ${k===selectedExpCurrency?'selected':''}" data-cur="${k}" style="${k===selectedExpCurrency?'background:var(--jacaranda-deep);border-color:var(--jacaranda-deep)':''}">${v.label}</div>`
+  ).join('');
+  row.querySelectorAll('.cat-chip').forEach(chip => {
+    chip.onclick = () => { selectedExpCurrency = chip.dataset.cur; buildExpCurrencyRow(); };
+  });
+}
+
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function nowTimeStr(){
+  const d = new Date();
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+
 function openExpenses(){
   renderExpenses();
   expenseOverlay.classList.add('open');
@@ -1223,8 +1371,12 @@ function openAddExpense(){
   document.getElementById('expAmount').value = '';
   document.getElementById('expMemo').value = '';
   document.getElementById('expPayer').value = '';
+  document.getElementById('expDate').value = todayStr();
+  document.getElementById('expTime').value = nowTimeStr();
   selectedExpCat = 'food';
+  selectedExpCurrency = data.displayCurrency || 'KRW';
   buildExpCatRow();
+  buildExpCurrencyRow();
   document.getElementById('expDeleteBtn').style.display = 'none';
   expenseFormOverlay.classList.add('open');
 }
@@ -1237,8 +1389,12 @@ function openEditExpense(id){
   document.getElementById('expAmount').value = exp.amount || '';
   document.getElementById('expMemo').value = exp.memo || '';
   document.getElementById('expPayer').value = exp.payer || '';
+  document.getElementById('expDate').value = exp.date || todayStr();
+  document.getElementById('expTime').value = exp.time || '';
   selectedExpCat = exp.category || 'food';
+  selectedExpCurrency = exp.currency || 'KRW';
   buildExpCatRow();
+  buildExpCurrencyRow();
   document.getElementById('expDeleteBtn').style.display = 'block';
   expenseFormOverlay.classList.add('open');
 }
@@ -1257,18 +1413,27 @@ document.getElementById('expCancelBtn').onclick = closeExpenseForm;
 expenseFormOverlay.addEventListener('click', (e) => {
   if(e.target === expenseFormOverlay) closeExpenseForm();
 });
+document.getElementById('curBtnKRW').onclick = () => setDisplayCurrency('KRW');
+document.getElementById('curBtnAUD').onclick = () => setDisplayCurrency('AUD');
+document.getElementById('exchangeRateBtn').onclick = setExchangeRate;
 
 document.getElementById('expSaveBtn').onclick = () => {
   const amount = Number(document.getElementById('expAmount').value);
   const memo = document.getElementById('expMemo').value.trim();
   const payer = document.getElementById('expPayer').value.trim();
+  const date = document.getElementById('expDate').value;
+  const time = document.getElementById('expTime').value;
   if(!amount || amount <= 0){ alert('금액을 입력해주세요'); return; }
   if(!data.expenses) data.expenses = [];
   if(editingExpenseId){
     const exp = data.expenses.find(e => e.id === editingExpenseId);
-    exp.amount = amount; exp.memo = memo; exp.category = selectedExpCat; exp.payer = payer;
+    exp.amount = amount; exp.memo = memo; exp.category = selectedExpCat;
+    exp.payer = payer; exp.currency = selectedExpCurrency; exp.date = date; exp.time = time;
   }else{
-    data.expenses.push({ id: uid(), amount, memo, category: selectedExpCat, payer, createdAt: Date.now() });
+    data.expenses.push({
+      id: uid(), amount, memo, category: selectedExpCat, payer,
+      currency: selectedExpCurrency, date, time, createdAt: Date.now()
+    });
   }
   saveData();
   closeExpenseForm();
