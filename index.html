@@ -1587,7 +1587,16 @@ function initInstallBanner(){
 }
 initInstallBanner();
 
-/* Service worker 등록 (오프라인 지원) + 업데이트 자동 반영 */
+/* Service worker 등록 (오프라인 지원) + 업데이트 확인
+   ------------------------------------------------------------
+   예전엔 새 버전이 감지되면(controllerchange) 화면을 강제로
+   새로고침했었는데, 이 새로고침이 하필 스플래시 탭 도중이나
+   막 일정 화면에 들어간 직후처럼 안 좋은 타이밍에 끼어들면서
+   "튕기는 것처럼" 보이는 문제가 반복적으로 생겼습니다.
+   그래서 강제 새로고침은 완전히 없앴습니다. 서비스워커는 여전히
+   백그라운드에서 새 버전을 미리 내려받아 준비해두기 때문에,
+   앱을 완전히 종료했다가 다시 여는 순간(즉, 지금 테스트하시는
+   방식 그대로) 자동으로 최신 버전이 적용됩니다. */
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('service-worker.js').then((reg) => {
@@ -1599,28 +1608,6 @@ if('serviceWorker' in navigator){
       });
     }).catch((err) => {
       console.warn('Service worker registration failed:', err);
-    });
-
-    // 새 서비스워커가 활성화되면(컨트롤러 교체) 화면을 한 번 새로고침해서
-    // 예전 JS가 아니라 최신 버전이 바로 반영되도록 합니다.
-    // 단, 스플래시 화면에서 "뉴런 공유"를 누르는 순간이나 다른 창(설정/가계부/일정 편집 등)이
-    // 열려있는 도중에 새로고침이 끼어들면 사용자 입장에선 그냥 "튕기는" 것처럼 보이므로,
-    // 안전한 타이밍(스플래시가 사라졌고 열려있는 창이 없을 때)까지 미뤄뒀다가 새로고침합니다.
-    let swRefreshed = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if(swRefreshed) return;
-      const attemptReload = () => {
-        const splashEl = document.getElementById('splash');
-        const splashActive = splashEl && splashEl.style.display !== 'none' && !splashEl.classList.contains('hide');
-        const overlayOpen = document.querySelector('.overlay.open');
-        if(splashActive || overlayOpen){
-          setTimeout(attemptReload, 500);
-          return;
-        }
-        swRefreshed = true;
-        window.location.reload();
-      };
-      attemptReload();
     });
   });
 }
